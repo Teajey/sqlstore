@@ -1,4 +1,4 @@
-module sqlstore
+module github.com/Teajey/sqlstore
 
 go 1.23
 
