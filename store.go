@@ -11,9 +11,10 @@ import (
 )
 
 type Statements struct {
-	Upsert *sql.Stmt
 	Delete *sql.Stmt
+	Insert *sql.Stmt
 	Select *sql.Stmt
+	Update *sql.Stmt
 }
 
 type Store struct {
@@ -89,19 +90,26 @@ func (s *Store) Save(r *http.Request, w http.ResponseWriter, session *sessions.S
 		return fmt.Errorf("Failed to encode cookie value: %w", err)
 	}
 
-	result, err := s.statements.Upsert.Exec(encodedValues)
-	if err != nil {
-		return fmt.Errorf("Failed to db insert cookie: %w", err)
+	if session.ID == "" {
+		result, err := s.statements.Insert.Exec(encodedValues)
+		if err != nil {
+			return fmt.Errorf("Failed to db insert cookie: %w", err)
+		}
+
+		id, err := result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("Failed to fetch last insert ID: %w", err)
+		}
+
+		session.ID = strconv.FormatInt(id, 10)
+	} else {
+		_, err := s.statements.Update.Exec(session.ID, encodedValues)
+		if err != nil {
+			return fmt.Errorf("Failed to db update cookie: %w", err)
+		}
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("Failed to fetch last insert ID: %w", err)
-	}
-
-	idString := strconv.FormatInt(id, 10)
-
-	encodedId, err := securecookie.EncodeMulti(session.Name(), idString,
+	encodedId, err := securecookie.EncodeMulti(session.Name(), session.ID,
 		s.Codecs...)
 	if err != nil {
 		return fmt.Errorf("Failed to encode cookie id: %w", err)
