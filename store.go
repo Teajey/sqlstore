@@ -67,6 +67,8 @@ func (s *Store) New(r *http.Request, name string) (*sessions.Session, error) {
 	err = securecookie.DecodeMulti(name, string(sessionValue), &session.Values, s.Codecs...)
 	if err == nil {
 		session.IsNew = false
+	} else {
+		err = fmt.Errorf("Failed to decode session values: %w", err)
 	}
 
 	return session, err
