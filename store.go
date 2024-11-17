@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/securecookie"
 	"github.com/gorilla/sessions"
@@ -95,10 +96,12 @@ func (s *Store) Save(r *http.Request, w http.ResponseWriter, session *sessions.S
 
 	id, err := result.LastInsertId()
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to fetch last insert ID: %w", err)
 	}
 
-	encodedId, err := securecookie.EncodeMulti(session.Name(), id,
+	idString := strconv.FormatInt(id, 10)
+
+	encodedId, err := securecookie.EncodeMulti(session.Name(), idString,
 		s.Codecs...)
 	if err != nil {
 		return fmt.Errorf("Failed to encode cookie id: %w", err)
