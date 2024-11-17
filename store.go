@@ -2,22 +2,20 @@ package sqlstore
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/securecookie"
 	"github.com/gorilla/sessions"
 )
 
 type Statements struct {
-	Insert *sql.Stmt
+	Upsert *sql.Stmt
 	Delete *sql.Stmt
-	Update *sql.Stmt
 	Select *sql.Stmt
 }
 
 type Store struct {
-	db         *sql.DB
 	statements Statements
 	Codecs     []securecookie.Codec
 	Options    *sessions.Options
@@ -25,7 +23,6 @@ type Store struct {
 
 func NewSqlStore(db *sql.DB, stmts Statements, keyPairs ...[]byte) *Store {
 	return &Store{
-		db:         db,
 		statements: stmts,
 		Codecs:     securecookie.CodecsFromPairs(keyPairs...),
 		Options:    &sessions.Options{},
@@ -51,19 +48,18 @@ func (s *Store) New(r *http.Request, name string) (*sessions.Session, error) {
 
 	c, errCookie := r.Cookie(name)
 	if errCookie != nil {
-		return session, err
+		return session, nil
 	}
 
 	err = securecookie.DecodeMulti(name, c.Value, &session.ID, s.Codecs...)
 	if err != nil {
-		return session, err
+		return session, fmt.Errorf("Failed to decode session id: %w", err)
 	}
 
 	var sessionValue string
 	err = s.statements.Select.QueryRow(session.ID).Scan(&sessionValue)
-	if err == nil {
-		session.IsNew = false
-		return session, err
+	if err != nil {
+		return session, fmt.Errorf("Failed to db select session value: %w", err)
 	}
 
 	err = securecookie.DecodeMulti(name, string(sessionValue), &session.Values, s.Codecs...)
@@ -80,21 +76,21 @@ func (s *Store) Save(r *http.Request, w http.ResponseWriter, session *sessions.S
 	if session.Options.MaxAge <= 0 {
 		_, err := s.statements.Delete.Exec(session.ID)
 		if err != nil {
-			return err
+			return fmt.Errorf("Failed to delete cookie: %w", err)
 		}
 		http.SetCookie(w, sessions.NewCookie(session.Name(), "", session.Options))
 		return nil
 	}
 
-	encoded, err := securecookie.EncodeMulti(session.Name(), session.Values,
+	encodedValues, err := securecookie.EncodeMulti(session.Name(), session.Values,
 		s.Codecs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to encode cookie value: %w", err)
 	}
 
-	result, err := s.statements.Insert.Exec(encoded)
+	result, err := s.statements.Upsert.Exec(encodedValues)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to db insert cookie: %w", err)
 	}
 
 	id, err := result.LastInsertId()
@@ -102,9 +98,13 @@ func (s *Store) Save(r *http.Request, w http.ResponseWriter, session *sessions.S
 		return err
 	}
 
-	session.ID = strconv.FormatInt(id, 10)
+	encodedId, err := securecookie.EncodeMulti(session.Name(), id,
+		s.Codecs...)
+	if err != nil {
+		return fmt.Errorf("Failed to encode cookie id: %w", err)
+	}
 
-	http.SetCookie(w, sessions.NewCookie(session.Name(), encoded, session.Options))
+	http.SetCookie(w, sessions.NewCookie(session.Name(), encodedId, session.Options))
 
 	return nil
 }
